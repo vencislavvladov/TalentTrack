@@ -3,6 +3,7 @@ import { Plus, MapPin, Calendar, Users, Eye, Edit, Trash2, Briefcase, DollarSign
 import { formatDate, formatSalary } from '../utils/helpers';
 import { Job } from '../types';
 import JobForm from './JobForm';
+import JobDetailModal from './JobDetailModal';
 import { exportToCSV, ExportColumn, formatDateForExport, formatSalaryRange } from '../utils/exportUtils';
 import { useJobs } from '../contexts/JobContext';
 import { useApplications } from '../contexts/ApplicationContext';
@@ -32,6 +33,7 @@ const Jobs: React.FC<JobsProps> = ({ onNavigate }) => {
   const { applications } = useApplications();
   const [showJobForm, setShowJobForm] = useState(false);
   const [editingJob, setEditingJob] = useState<Job | undefined>(undefined);
+  const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [filterConditions, setFilterConditions] = useState<FilterCondition[]>([]);
   const [sortBy, setSortBy] = useState<keyof DenormalizedJob>('postedDate');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
@@ -240,6 +242,10 @@ const Jobs: React.FC<JobsProps> = ({ onNavigate }) => {
     }
   };
 
+  const handleViewDetails = (jobId: string) => {
+    setSelectedJobId(jobId);
+  };
+
   const handleExport = () => {
     const exportColumns: ExportColumn[] = [
       { key: 'title', label: 'Job Title' },
@@ -401,6 +407,7 @@ const Jobs: React.FC<JobsProps> = ({ onNavigate }) => {
                   <td className="px-4 py-4 whitespace-nowrap">
                     <div className="flex items-center space-x-2">
                       <button 
+                        onClick={() => handleViewDetails(job.jobId)}
                         className="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors duration-200"
                         title="View Details"
                       >
@@ -468,6 +475,14 @@ const Jobs: React.FC<JobsProps> = ({ onNavigate }) => {
           }}
           onSave={handleSaveJob}
           editJob={editingJob}
+        />
+      )}
+
+      {/* Job Detail Modal */}
+      {selectedJobId && (
+        <JobDetailModal
+          jobId={selectedJobId}
+          onClose={() => setSelectedJobId(null)}
         />
       )}
     </div>
