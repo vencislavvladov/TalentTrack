@@ -43,7 +43,7 @@ const AppContent: React.FC = () => {
   // Define navigation items based on user role
   const getNavigationItems = () => {
     const baseItems = [
-      { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: ['admin', 'recruiter'] },
+      { id: 'dashboard', label: 'Dashboards', icon: LayoutDashboard, roles: ['admin', 'recruiter'] },
       { id: 'jobs', label: 'Jobs', icon: Briefcase, roles: ['admin', 'recruiter'] },
       { id: 'applications', label: 'Applications', icon: FileText, roles: ['admin', 'recruiter'] },
       { id: 'applications-overview', label: 'Overview', icon: FileText, roles: ['admin', 'recruiter'] },
