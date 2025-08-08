@@ -29,7 +29,7 @@ import { CandidateProvider } from './contexts/CandidateContext';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { UserProvider } from './contexts/UserContext';
 
-type Tab = 'dashboards' | 'jobs' | 'applications' | 'applications-overview' | 'candidates' | 'apply' | 'users';
+type Tab = 'dashboard' | 'jobs' | 'applications' | 'applications-overview' | 'candidates' | 'apply' | 'users';
 
 const AppContent: React.FC = () => {
   const { user, isAuthenticated, logout } = useAuth();
