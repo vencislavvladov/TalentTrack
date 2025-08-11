@@ -1,14 +1,17 @@
 import React, { createContext, useContext, useState, ReactNode } from 'react';
 import { Application } from '../types';
-import { mockApplications } from '../data/mockData';
+import { supabase } from '../lib/supabase';
 
 interface ApplicationContextType {
   applications: Application[];
+  loading: boolean;
+  error: string | null;
   addApplication: (application: Omit<Application, 'id' | 'appliedDate' | 'lastUpdated' | 'stage'>) => void;
   updateApplication: (id: string, updates: Partial<Application>) => void;
   deleteApplication: (id: string) => void;
   updateApplicationStatus: (id: string, status: Application['status']) => void;
   addApplicationNote: (id: string, note: string) => void;
+  refreshApplications: () => Promise<void>;
 }
 
 const ApplicationContext = createContext<ApplicationContextType | undefined>(undefined);
@@ -38,31 +41,147 @@ const getStageFromStatus = (status: Application['status']): number => {
 };
 
 export const ApplicationProvider: React.FC<ApplicationProviderProps> = ({ children }) => {
-  const [applications, setApplications] = useState<Application[]>(mockApplications);
+  const [applications, setApplications] = useState<Application[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // Load applications from Supabase
+  const refreshApplications = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      const { data, error: supabaseError } = await supabase
+        .from('applications')
+        .select(`
+          *,
+          jobs!inner(title),
+          candidates!inner(name, email)
+        `)
+        .order('created_at', { ascending: false });
+
+      if (supabaseError) throw supabaseError;
+
+      // Transform Supabase data to match our Application interface
+      const transformedApplications: Application[] = (data || []).map(app => ({
+        id: app.id,
+        jobId: app.job_id,
+        jobTitle: app.jobs.title,
+        candidateId: app.candidate_id,
+        candidateName: app.candidates.name,
+        candidateEmail: app.candidates.email,
+        status: app.status,
+        appliedDate: app.applied_date,
+        lastUpdated: app.last_updated,
+        resumeUrl: app.resume_url,
+        coverLetter: app.cover_letter,
+        notes: app.notes,
+        stage: app.stage
+      }));
+
+      setApplications(transformedApplications);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load applications');
+      console.error('Error loading applications:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Load applications on mount
+  React.useEffect(() => {
+    refreshApplications();
+  }, []);
 
   const addApplication = (applicationData: Omit<Application, 'id' | 'appliedDate' | 'lastUpdated' | 'stage'>) => {
-    const newApplication: Application = {
-      ...applicationData,
-      id: Date.now().toString(),
-      appliedDate: new Date().toISOString().split('T')[0],
-      lastUpdated: new Date().toISOString().split('T')[0],
-      stage: getStageFromStatus(applicationData.status),
-      notes: applicationData.notes || []
+    const insertApplication = async () => {
+      try {
+        setError(null);
+        
+        const { data, error: supabaseError } = await supabase
+          .from('applications')
+          .insert({
+            job_id: applicationData.jobId,
+            candidate_id: applicationData.candidateId,
+            status: applicationData.status,
+            stage: getStageFromStatus(applicationData.status),
+            resume_url: applicationData.resumeUrl,
+            cover_letter: applicationData.coverLetter,
+            notes: applicationData.notes || []
+          })
+          .select(`
+            *,
+            jobs!inner(title),
+            candidates!inner(name, email)
+          `)
+          .single();
+
+        if (supabaseError) throw supabaseError;
+
+        // Add to local state
+        const newApplication: Application = {
+          id: data.id,
+          jobId: data.job_id,
+          jobTitle: data.jobs.title,
+          candidateId: data.candidate_id,
+          candidateName: data.candidates.name,
+          candidateEmail: data.candidates.email,
+          status: data.status,
+          appliedDate: data.applied_date,
+          lastUpdated: data.last_updated,
+          resumeUrl: data.resume_url,
+          coverLetter: data.cover_letter,
+          notes: data.notes,
+          stage: data.stage
+        };
+
+        setApplications(prev => [newApplication, ...prev]);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to create application');
+        console.error('Error creating application:', err);
+      }
     };
-    setApplications(prev => [newApplication, ...prev]);
+    
+    insertApplication();
   };
 
   const updateApplication = (id: string, updates: Partial<Application>) => {
-    setApplications(prev => prev.map(app => 
-      app.id === id 
-        ? { 
-            ...app, 
-            ...updates, 
-            lastUpdated: new Date().toISOString().split('T')[0],
-            stage: updates.status ? getStageFromStatus(updates.status) : app.stage
-          }
-        : app
-    ));
+    const updateApplicationInDb = async () => {
+      try {
+        setError(null);
+        
+        const { error: supabaseError } = await supabase
+          .from('applications')
+          .update({
+            status: updates.status,
+            stage: updates.status ? getStageFromStatus(updates.status) : undefined,
+            resume_url: updates.resumeUrl,
+            cover_letter: updates.coverLetter,
+            notes: updates.notes,
+            last_updated: new Date().toISOString().split('T')[0]
+          })
+          .eq('id', id);
+
+        if (supabaseError) throw supabaseError;
+
+        // Update local state
+        setApplications(prev => prev.map(app => 
+          app.id === id 
+            ? { 
+                ...app, 
+                ...updates, 
+                lastUpdated: new Date().toISOString().split('T')[0],
+                stage: updates.status ? getStageFromStatus(updates.status) : app.stage
+              }
+            : app
+        ));
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to update application');
+        console.error('Error updating application:', err);
+      }
+    };
+
+    updateApplicationInDb();
   };
 
   const updateApplicationStatus = (id: string, status: Application['status']) => {
@@ -70,29 +189,78 @@ export const ApplicationProvider: React.FC<ApplicationProviderProps> = ({ childr
   };
 
   const addApplicationNote = (id: string, note: string) => {
-    setApplications(prev => prev.map(app => 
-      app.id === id 
-        ? { 
-            ...app, 
-            notes: [...app.notes, note],
-            lastUpdated: new Date().toISOString().split('T')[0]
-          }
-        : app
-    ));
+    const addNoteToDb = async () => {
+      try {
+        setError(null);
+        
+        const application = applications.find(app => app.id === id);
+        if (!application) return;
+
+        const updatedNotes = [...application.notes, note];
+
+        const { error: supabaseError } = await supabase
+          .from('applications')
+          .update({
+            notes: updatedNotes,
+            last_updated: new Date().toISOString().split('T')[0]
+          })
+          .eq('id', id);
+
+        if (supabaseError) throw supabaseError;
+
+        // Update local state
+        setApplications(prev => prev.map(app => 
+          app.id === id 
+            ? { 
+                ...app, 
+                notes: updatedNotes,
+                lastUpdated: new Date().toISOString().split('T')[0]
+              }
+            : app
+        ));
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to add note');
+        console.error('Error adding note:', err);
+      }
+    };
+
+    addNoteToDb();
   };
 
   const deleteApplication = (id: string) => {
-    setApplications(prev => prev.filter(app => app.id !== id));
+    const deleteApplicationFromDb = async () => {
+      try {
+        setError(null);
+        
+        const { error: supabaseError } = await supabase
+          .from('applications')
+          .delete()
+          .eq('id', id);
+
+        if (supabaseError) throw supabaseError;
+
+        // Update local state
+        setApplications(prev => prev.filter(app => app.id !== id));
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to delete application');
+        console.error('Error deleting application:', err);
+      }
+    };
+
+    deleteApplicationFromDb();
   };
 
   return (
-    <ApplicationContext.Provider value={{ 
-      applications, 
+    <ApplicationContext.Provider value={{
+      applications,
+      loading,
+      error,
       addApplication, 
       updateApplication, 
       deleteApplication, 
       updateApplicationStatus,
-      addApplicationNote
+      addApplicationNote,
+      refreshApplications
     }}>
       {children}
     </ApplicationContext.Provider>

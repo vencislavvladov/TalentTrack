@@ -1,212 +1,143 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { User, AuthState } from '../types';
+import React, { createContext, useContext, useState, ReactNode } from 'react';
+import { Application } from '../types';
+import { loadData, saveData } from '../utils/storage';
 
-interface AuthContextType extends AuthState {
-  login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
-  register: (email: string, password: string, name: string) => Promise<{ success: boolean; error?: string }>;
-  logout: () => void;
-  updateUser: (updates: Partial<User>) => void;
+interface ApplicationContextType {
+  applications: Application[];
+  addApplication: (application: Omit<Application, 'id' | 'appliedDate' | 'lastUpdated' | 'stage'>) => void;
+  updateApplication: (id: string, updates: Partial<Application>) => void;
+  deleteApplication: (id: string) => void;
+  updateApplicationStatus: (id: string, status: Application['status']) => void;
+  addApplicationNote: (id: string, note: string) => void;
 }
 
-const AuthContext = createContext<AuthContextType | undefined>(undefined);
+const ApplicationContext = createContext<ApplicationContextType | undefined>(undefined);
 
-export const useAuth = () => {
-  const context = useContext(AuthContext);
+export const useApplications = () => {
+  const context = useContext(ApplicationContext);
   if (!context) {
-    throw new Error('useAuth must be used within an AuthProvider');
+    throw new Error('useApplications must be used within an ApplicationProvider');
   }
   return context;
 };
 
-// Mock users for demonstration
-const mockUsers: User[] = [
-  {
-    id: '1',
-    email: 'admin@company.com',
-    name: 'Admin User',
-    role: 'admin',
-    isActive: true,
-    createdAt: '2024-01-01',
-    lastLogin: '2024-01-25'
-  },
-  {
-    id: '2',
-    email: 'recruiter@company.com',
-    name: 'Jane Recruiter',
-    role: 'recruiter',
-    isActive: true,
-    createdAt: '2024-01-02',
-    lastLogin: '2024-01-24'
-  },
-  {
-    id: '3',
-    email: 'candidate@email.com',
-    name: 'John Candidate',
-    role: 'candidate',
-    isActive: true,
-    createdAt: '2024-01-03',
-    lastLogin: '2024-01-23'
-  }
-];
-
-interface AuthProviderProps {
+interface ApplicationProviderProps {
   children: ReactNode;
 }
 
-export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
-  const [authState, setAuthState] = useState<AuthState>({
-    user: null,
-    isAuthenticated: false,
-    isLoading: true
+const getStageFromStatus = (status: Application['status']): number => {
+  switch (status) {
+    case 'applied': return 1;
+    case 'screening': return 2;
+    case 'interview': return 3;
+    case 'offer': return 4;
+    case 'hired': return 5;
+    case 'rejected': return 0;
+    default: return 1;
+  }
+};
+
+export const ApplicationProvider: React.FC<ApplicationProviderProps> = ({ children }) => {
+  const [applications, setApplications] = useState<Application[]>(() => {
+    const data = loadData();
+    return data.applications;
   });
 
-  // Check for existing session on mount
-  useEffect(() => {
-    const checkAuth = () => {
-      const token = localStorage.getItem('auth_token');
-      const userData = localStorage.getItem('user_data');
-      
-      if (token && userData) {
-        try {
-          const user = JSON.parse(userData);
+  // Save to localStorage whenever applications change
+  const saveApplications = (newApplications: Application[]) => {
+    const data = loadData();
+      const { data, error } = await supabase.auth.signUp({
+                
+        password,
+        options: {
+          data: {
+            name,
+            role: 'candidate'
+          }
+        }
+      });
+    };
+
+    checkAuth();
+  const addApplication = (applicationData: Omit<Application, 'id' | 'appliedDate' | 'lastUpdated' | 'stage'>) => {
+    // Listen for auth changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (event === 'SIGNED_IN' && session?.user) {
+        // Get user profile
+        const { data: userProfile } = await supabase
+          .from('users')
+          .select('*')
+          .eq('id', session.user.id)
+          .single();
+    const newApplication: Application = {
+        if (userProfile) {
+          const user: User = {
+            id: userProfile.id,
+            email: userProfile.email,
+            name: userProfile.name,
+            role: userProfile.role,
+            isActive: userProfile.is_active,
+            createdAt: userProfile.created_at.split('T')[0],
+            lastLogin: userProfile.last_login?.split('T')[0],
+            avatar: userProfile.avatar
+          };
+          
           setAuthState({
             user,
             isAuthenticated: true,
             isLoading: false
           });
-        } catch (error) {
-          localStorage.removeItem('auth_token');
-          localStorage.removeItem('user_data');
-          setAuthState({
-            user: null,
-            isAuthenticated: false,
-            isLoading: false
-          });
         }
-      } else {
-        setAuthState({
-          user: null,
-          isAuthenticated: false,
-          isLoading: false
-        });
-      }
-    };
-
-    checkAuth();
-  }, []);
-
-  const login = async (email: string, password: string): Promise<{ success: boolean; error?: string }> => {
-    try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      // Find user by email
-      const user = mockUsers.find(u => u.email === email && u.isActive);
-      
-      if (!user) {
-        return { success: false, error: 'Invalid email or password' };
-      }
-      
-      // In a real app, you'd verify the password hash here
-      if (password !== 'password123') {
-        return { success: false, error: 'Invalid email or password' };
-      }
-      
-      // Update last login
-      const updatedUser = { ...user, lastLogin: new Date().toISOString().split('T')[0] };
-      
-      // Generate mock token
-      const token = `mock_token_${user.id}_${Date.now()}`;
-      
-      // Store in localStorage
-      localStorage.setItem('auth_token', token);
-      localStorage.setItem('user_data', JSON.stringify(updatedUser));
-      
-      setAuthState({
-        user: updatedUser,
-        isAuthenticated: true,
-        isLoading: false
-      });
-      
-      return { success: true };
-    } catch (error) {
-      return { success: false, error: 'Login failed. Please try again.' };
-    }
+      } else if (event === 'SIGNED_OUT') {
+    supabase.auth.signOut();
+    const newApplications = [newApplication, ...applications];
+    saveApplications(newApplications);
   };
 
-  const register = async (email: string, password: string, name: string): Promise<{ success: boolean; error?: string }> => {
-    try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      // Check if user already exists
-      const existingUser = mockUsers.find(u => u.email === email);
-      if (existingUser) {
-        return { success: false, error: 'User with this email already exists' };
-      }
-      
-      // Create new user
-      const newUser: User = {
-        id: Date.now().toString(),
-        email,
-        name,
-        role: 'candidate', // Default role
-        isActive: true,
-        createdAt: new Date().toISOString().split('T')[0]
-      };
-      
-      // Add to mock users (in real app, this would be an API call)
-      mockUsers.push(newUser);
-      
-      // Generate mock token
-      const token = `mock_token_${newUser.id}_${Date.now()}`;
-      
-      // Store in localStorage
-      localStorage.setItem('auth_token', token);
-      localStorage.setItem('user_data', JSON.stringify(newUser));
-      
-      setAuthState({
-        user: newUser,
-        isAuthenticated: true,
-        isLoading: false
-      });
-      
-      return { success: true };
-    } catch (error) {
-      return { success: false, error: 'Registration failed. Please try again.' };
-    }
+  const updateApplication = (id: string, updates: Partial<Application>) => {
+    const updatedApplications = applications.map(app => 
+      app.id === id 
+        ? { 
+            ...app, 
+            ...updates, 
+            lastUpdated: new Date().toISOString().split('T')[0],
+            stage: updates.status ? getStageFromStatus(updates.status) : app.stage
+          }
+        : app
+    );
+    saveApplications(updatedApplications);
   };
 
-  const logout = () => {
-    localStorage.removeItem('auth_token');
-    localStorage.removeItem('user_data');
-    setAuthState({
-      user: null,
-      isAuthenticated: false,
-      isLoading: false
-    });
+  const updateApplicationStatus = (id: string, status: Application['status']) => {
+    updateApplication(id, { status });
   };
 
-  const updateUser = (updates: Partial<User>) => {
-    if (authState.user) {
-      const updatedUser = { ...authState.user, ...updates };
-      localStorage.setItem('user_data', JSON.stringify(updatedUser));
-      setAuthState(prev => ({
-        ...prev,
-        user: updatedUser
-      }));
-    }
+  const addApplicationNote = (id: string, note: string) => {
+    const updatedApplications = applications.map(app => 
+      app.id === id 
+        ? { 
+            ...app, 
+            notes: [...app.notes, note],
+            lastUpdated: new Date().toISOString().split('T')[0]
+          }
+        : app
+    ));
+  };
+
+  const deleteApplication = (id: string) => {
+    setApplications(prev => prev.filter(app => app.id !== id));
   };
 
   return (
-    <AuthContext.Provider value={{
-      ...authState,
-      login,
-      register,
-      logout,
-      updateUser
+    <ApplicationContext.Provider value={{ 
+      applications, 
+      addApplication, 
+      updateApplication, 
+      deleteApplication, 
+      updateApplicationStatus,
+      addApplicationNote
     }}>
       {children}
-    </AuthContext.Provider>
+    </ApplicationContext.Provider>
   );
 };
