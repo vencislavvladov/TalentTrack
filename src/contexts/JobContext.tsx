@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, ReactNode } from 'react';
 import { Job } from '../types';
-import { mockJobs } from '../data/mockData';
+import { loadData, saveData } from '../utils/storage';
 
 interface JobContextType {
   jobs: Job[];
@@ -24,7 +24,18 @@ interface JobProviderProps {
 }
 
 export const JobProvider: React.FC<JobProviderProps> = ({ children }) => {
-  const [jobs, setJobs] = useState<Job[]>(mockJobs);
+  const [jobs, setJobs] = useState<Job[]>(() => {
+    const data = loadData();
+    return data.jobs;
+  });
+
+  // Save to localStorage whenever jobs change
+  const saveJobs = (newJobs: Job[]) => {
+    const data = loadData();
+    data.jobs = newJobs;
+    saveData(data);
+    setJobs(newJobs);
+  };
 
   const addJob = (jobData: Omit<Job, 'id' | 'postedDate' | 'applicationCount'>) => {
     const newJob: Job = {
@@ -35,23 +46,23 @@ export const JobProvider: React.FC<JobProviderProps> = ({ children }) => {
     };
     
     console.log('Adding new job:', newJob); // Debug log
-    setJobs(prev => {
-      const updated = [newJob, ...prev];
-      console.log('Updated jobs list:', updated); // Debug log
-      return updated;
-    });
+    const newJobs = [newJob, ...jobs];
+    saveJobs(newJobs);
+    console.log('Updated jobs list:', newJobs); // Debug log
   };
 
   const updateJob = (id: string, jobData: Omit<Job, 'id' | 'postedDate' | 'applicationCount'>) => {
-    setJobs(prev => prev.map(job => 
+    const updatedJobs = jobs.map(job => 
       job.id === id 
         ? { ...job, ...jobData }
         : job
-    ));
+    );
+    saveJobs(updatedJobs);
   };
 
   const deleteJob = (id: string) => {
-    setJobs(prev => prev.filter(job => job.id !== id));
+    const filteredJobs = jobs.filter(job => job.id !== id);
+    saveJobs(filteredJobs);
   };
 
   return (
