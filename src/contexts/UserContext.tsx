@@ -1,14 +1,14 @@
-import React, { createContext, useContext, useState, ReactNode } from 'react';
-import { User } from '../types';
+import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
+import { User } from './AuthContext';
 
 interface UserContextType {
   users: User[];
   loading: boolean;
   error: string | null;
-  addUser: (user: Omit<User, 'id' | 'createdAt' | 'lastLogin'>) => void;
-  updateUser: (id: string, updates: Partial<User>) => void;
-  deleteUser: (id: string) => void;
+  addUser: (user: Omit<User, 'id' | 'createdAt'>) => Promise<void>;
+  updateUser: (id: string, updates: Partial<User>) => Promise<void>;
+  deleteUser: (id: string) => Promise<void>;
   getUsersByRole: (role: User['role']) => User[];
   refreshUsers: () => Promise<void>;
 }
@@ -32,27 +32,25 @@ export const UserProvider: React.FC<UserProviderProps> = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Load users from Supabase
   const refreshUsers = async () => {
     try {
       setLoading(true);
       setError(null);
       
-      const { data, error: supabaseError } = await supabase
+      const { data: userData, error: supabaseError } = await supabase
         .from('users')
         .select('*')
         .order('created_at', { ascending: false });
 
       if (supabaseError) throw supabaseError;
 
-      // Transform Supabase data to match our User interface
-      const transformedUsers: User[] = (data || []).map(user => ({
+      const transformedUsers: User[] = (userData || []).map(user => ({
         id: user.id,
         email: user.email,
         name: user.name,
         role: user.role,
         isActive: user.is_active,
-        createdAt: user.created_at.split('T')[0],
+        createdAt: user.created_at?.split('T')[0],
         lastLogin: user.last_login?.split('T')[0],
         avatar: user.avatar
       }));
@@ -66,122 +64,208 @@ export const UserProvider: React.FC<UserProviderProps> = ({ children }) => {
     }
   };
 
-  // Load users on mount
-  React.useEffect(() => {
+  useEffect(() => {
     refreshUsers();
   }, []);
 
-  const addUser = (userData: Omit<User, 'id' | 'createdAt' | 'lastLogin'>) => {
-    const insertUser = async () => {
+  const getUsersByRole = (role: User['role']): User[] => {
+    return users.filter(user => user.role === role);
+  };
+
+  const addUser = async (userData: Omit<User, 'id' | 'createdAt'>) => {
+    try {
+      setError(null);
+      
+      const { data: newUserData, error: supabaseError } = await supabase
+        .from('users')
+        .insert({
+          email: userData.email,
+          name: userData.name,
+          role: userData.role,
+          is_active: userData.isActive,
+          avatar: userData.avatar
+        })
+        .select()
+        .single();
+  React.useEffect(() => {
+    refreshApplications();
+  }, []);
+
+  const addApplication = (applicationData: Omit<Application, 'id' | 'appliedDate' | 'lastUpdated' | 'stage'>) => {
+    const insertApplication = async () => {
       try {
         setError(null);
         
         const { data, error: supabaseError } = await supabase
-          .from('users')
+          .from('applications')
           .insert({
-            email: userData.email,
-            name: userData.name,
-            role: userData.role,
-            is_active: userData.isActive,
-            avatar: userData.avatar
+            job_id: applicationData.jobId,
+            candidate_id: applicationData.candidateId,
+            status: applicationData.status,
+            stage: getStageFromStatus(applicationData.status),
+            resume_url: applicationData.resumeUrl,
+            cover_letter: applicationData.coverLetter,
+            notes: applicationData.notes || []
           })
-          .select()
+          .select(`
+            *,
+            jobs!inner(title),
+            candidates!inner(name, email)
+          `)
           .single();
 
         if (supabaseError) throw supabaseError;
 
         // Add to local state
-        const newUser: User = {
+        const newApplication: Application = {
           id: data.id,
-          email: data.email,
-          name: data.name,
-          role: data.role,
-          isActive: data.is_active,
-          createdAt: data.created_at.split('T')[0],
-          lastLogin: data.last_login?.split('T')[0],
-          avatar: data.avatar
+          jobId: data.job_id,
+          jobTitle: data.jobs.title,
+          candidateId: data.candidate_id,
+          candidateName: data.candidates.name,
+          candidateEmail: data.candidates.email,
+          status: data.status,
+          appliedDate: data.applied_date,
+          lastUpdated: data.last_updated,
+          resumeUrl: data.resume_url,
+          coverLetter: data.cover_letter,
+          notes: data.notes,
+          stage: data.stage
         };
 
-        setUsers(prev => [newUser, ...prev]);
+        setApplications(prev => [newApplication, ...prev]);
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to create user');
-        console.error('Error creating user:', err);
+        setError(err instanceof Error ? err.message : 'Failed to create application');
+        console.error('Error creating application:', err);
       }
     };
     
-    insertUser();
+    const newApplications = [newApplication, ...applications];
+    saveApplications(newApplications);
   };
 
-  const updateUser = (id: string, updates: Partial<User>) => {
-    const updateUserInDb = async () => {
+  const updateApplication = (id: string, updates: Partial<Application>) => {
+    const updateApplicationInDb = async () => {
       try {
         setError(null);
         
         const { error: supabaseError } = await supabase
-          .from('users')
+          .from('applications')
           .update({
-            email: updates.email,
-            name: updates.name,
-            role: updates.role,
-            is_active: updates.isActive,
-            avatar: updates.avatar
+            status: updates.status,
+            stage: updates.status ? getStageFromStatus(updates.status) : undefined,
+            resume_url: updates.resumeUrl,
+            cover_letter: updates.coverLetter,
+            notes: updates.notes,
+            last_updated: new Date().toISOString().split('T')[0]
           })
           .eq('id', id);
 
         if (supabaseError) throw supabaseError;
 
         // Update local state
-        setUsers(prev => prev.map(user => 
-          user.id === id ? { ...user, ...updates } : user
+        setApplications(prev => prev.map(app => 
+          app.id === id 
+            ? { 
+                ...app, 
+                ...updates, 
+                lastUpdated: new Date().toISOString().split('T')[0],
+                stage: updates.status ? getStageFromStatus(updates.status) : app.stage
+              }
+            : app
         ));
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to update user');
-        console.error('Error updating user:', err);
+        setError(err instanceof Error ? err.message : 'Failed to update application');
+        console.error('Error updating application:', err);
       }
     };
 
-    updateUserInDb();
+    );
+    saveApplications(updatedApplications);
   };
 
-  const deleteUser = (id: string) => {
-    const deleteUserFromDb = async () => {
+  const updateApplicationStatus = (id: string, status: Application['status']) => {
+    updateApplication(id, { status });
+  };
+
+  const addApplicationNote = (id: string, note: string) => {
+    const updatedApplications = applications.map(app => 
+      try {
+        setError(null);
+        
+        const application = applications.find(app => app.id === id);
+        if (!application) return;
+
+        const updatedNotes = [...application.notes, note];
+
+        const { error: supabaseError } = await supabase
+          .from('applications')
+          .update({
+            notes: updatedNotes,
+            last_updated: new Date().toISOString().split('T')[0]
+          })
+          .eq('id', id);
+
+        if (supabaseError) throw supabaseError;
+
+        // Update local state
+        setApplications(prev => prev.map(app => 
+          app.id === id 
+            ? { 
+                ...app, 
+                notes: updatedNotes,
+                lastUpdated: new Date().toISOString().split('T')[0]
+              }
+            : app
+        ));
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to add note');
+        console.error('Error adding note:', err);
+      }
+    };
+
+    addNoteToDb();
+  };
+
+  const deleteApplication = (id: string) => {
+    const deleteApplicationFromDb = async () => {
       try {
         setError(null);
         
         const { error: supabaseError } = await supabase
-          .from('users')
+          .from('applications')
           .delete()
           .eq('id', id);
 
         if (supabaseError) throw supabaseError;
 
         // Update local state
-        setUsers(prev => prev.filter(user => user.id !== id));
+        setApplications(prev => prev.filter(app => app.id !== id));
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to delete user');
-        console.error('Error deleting user:', err);
+        setError(err instanceof Error ? err.message : 'Failed to delete application');
+        console.error('Error deleting application:', err);
       }
     };
 
-    deleteUserFromDb();
-  };
-
-  const getUsersByRole = (role: User['role']) => {
-    return users.filter(user => user.role === role);
+    deleteApplicationFromDb();
   };
 
   return (
-    <UserContext.Provider value={{
-      users,
+    <UserContext.Provider value={{ 
+      applications,
       loading,
       error,
-      addUser,
-      updateUser,
-      deleteUser,
+      addApplication, 
+      loading,
+      error,
+      updateApplication, 
+      deleteApplication, 
+      updateApplicationStatus,
+      addApplicationNote,
       getUsersByRole,
       refreshUsers
     }}>
       {children}
-    </UserContext.Provider>
+    </ApplicationContext.Provider>
   );
 };
